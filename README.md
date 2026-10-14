@@ -31,10 +31,14 @@ Pastikan perangkat Anda telah terpasang:
 Proyek ini menggunakan arsitektur multi-container dengan 2 service utama:
 
 ```mermaid
-graph TD
-    Client[Client / Postman / Browser] -->|Port 8080| Backend[Service: backend (Node.js 20 Alpine)]
-    Backend -->|Internal Network: pojok_teduh_network : 5432| DB[(Service: db - PostgreSQL 16 Alpine)]
-    DB <-->|Persistent Storage| Volume[(Volume: pojok_teduh_postgres_data)]
+flowchart TD
+    Client["Client / Postman / Browser"] -->|"Port 8080"| Backend["Service: backend (Node.js 20 Alpine)"]
+
+    subgraph Network ["Docker Network: pojok_teduh_network"]
+        Backend -->|"Port 5432"| DB[("Service: db - PostgreSQL 16")]
+    end
+
+    DB ---|"Persistent Storage"| Volume[("Volume: pojok_teduh_postgres_data")]
 ```
 
 ### 1. `Dockerfile` (Multi-Stage Build)
