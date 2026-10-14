@@ -1,0 +1,57 @@
+services:
+  # ==========================================
+  # Service Database (PostgreSQL)
+  # ==========================================
+  db:
+    image: postgres:16-alpine
+    container_name: pojok_teduh_db
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres123}
+      POSTGRES_DB: ${POSTGRES_DB:-pojok_teduh_db}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      # Volume untuk persistensi data database
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - pojok_teduh_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-pojok_teduh_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ==========================================
+  # Service Backend (Express TypeScript API)
+  # ==========================================
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pojok_teduh_backend
+    restart: always
+    ports:
+      - "${PORT:-8080}:8080"
+    environment:
+      - NODE_ENV=production
+      - PORT=8080
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres123}@db:5432/${POSTGRES_DB:-pojok_teduh_db}?schema=public
+      - JWT_SECRET=${JWT_SECRET:-pojok_teduh_secret_key_2026}
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - pojok_teduh_network
+
+# Volume persistent untuk data PostgreSQL
+volumes:
+  postgres_data:
+    name: pojok_teduh_postgres_data
+
+# Jaringan terisolasi untuk komunikasi antar-service
+networks:
+  pojok_teduh_network:
+    name: pojok_teduh_network
+    driver: bridge

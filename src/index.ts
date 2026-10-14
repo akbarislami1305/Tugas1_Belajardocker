@@ -9,6 +9,8 @@ import { errorHandler } from "./middlewares/error.middleware.js";
 import bookmarksRoutes from "./routes/bookmarks.routes.js";
 import "dotenv/config"; 
 import { swaggerSpec } from "./utils/swagger.js";
+import { runMigrations } from "./db/migrate.js";
+import { runSeed } from "./db/seed.js";
 
 const app = express();
 const PORT = process.env.PORT || 8080; 
@@ -70,8 +72,19 @@ app.use("/bookmarks", bookmarksRoutes);
 
 app.use(errorHandler);
 
-app.listen(PORT, () => {
-  console.log(`🚀 Server BERHASIL JALAN di http://localhost:${PORT}`);
-});
+const startServer = async () => {
+  try {
+    await runMigrations();
+    await runSeed();
+  } catch (error) {
+    console.warn("⚠️ Peringatan migrasi/seeding database:", error);
+  }
+
+  app.listen(PORT, () => {
+    console.log(`🚀 Server BERHASIL JALAN di http://localhost:${PORT}`);
+  });
+};
+
+startServer();
 
 export default app;

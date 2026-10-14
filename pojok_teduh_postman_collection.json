@@ -1,0 +1,109 @@
+{
+	"info": {
+		"_postman_id": "793c87e5-cb57-423e-978b-9a25d62fbbc7",
+		"name": "Pojok Teduh API - Docker Test",
+		"description": "Koleksi Postman untuk pengujian endpoint API Pojok Teduh yang berjalan di Docker Compose.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "1. Health Check (Root)",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "http://localhost:8080/",
+					"protocol": "http",
+					"host": ["localhost"],
+					"port": "8080",
+					"path": [""]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "2. Register User",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"username\": \"mentee_postman\",\n  \"email\": \"mentee_postman@example.com\",\n  \"password\": \"password123\"\n}"
+				},
+				"url": {
+					"raw": "http://localhost:8080/auth/user/register",
+					"protocol": "http",
+					"host": ["localhost"],
+					"port": "8080",
+					"path": ["auth", "user", "register"]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "3. Login User",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"email\": \"mentee_postman@example.com\",\n  \"password\": \"password123\"\n}"
+				},
+				"url": {
+					"raw": "http://localhost:8080/auth/user/login",
+					"protocol": "http",
+					"host": ["localhost"],
+					"port": "8080",
+					"path": ["auth", "user", "login"]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "4. Get All Spots / Search",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "http://localhost:8080/spots/search",
+					"protocol": "http",
+					"host": ["localhost"],
+					"port": "8080",
+					"path": ["spots", "search"]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "5. Get User Profile (Protected - Bearer Token)",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer {{token}}",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "http://localhost:8080/users/profile",
+					"protocol": "http",
+					"host": ["localhost"],
+					"port": "8080",
+					"path": ["users", "profile"]
+				}
+			},
+			"response": []
+		}
+	]
+}

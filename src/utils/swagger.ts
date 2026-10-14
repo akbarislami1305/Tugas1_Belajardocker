@@ -11,21 +11,22 @@ const options: swaggerJsdoc.Options = {
     },
     servers: [
       {
-        // Ganti dengan URL Vercel kamu!
-        url: "https://capstone-pojokteduh.vercel.app",
-        description: "Production Server (Vercel)",
+        url: "http://localhost:8080",
+        description: "Local / Docker Server",
       },
       {
-        url: "http://localhost:8080",
-        description: "Development Server (Local)",
+        url: "https://capstone-pojokteduh.vercel.app",
+        description: "Production Server (Vercel)",
       },
     ],
   },
   apis: [
-    path.join(process.cwd(), "src/routes/*.ts"),
+    path.join(process.cwd(), "dist/src/routes/*.js"),
     path.join(process.cwd(), "dist/routes/*.js"),
-    "**/*.ts",
-    "**/*.js"
+    path.join(process.cwd(), "src/routes/*.ts"),
+    path.join(process.cwd(), "src/routes/*.js"),
+    "./dist/src/routes/*.js",
+    "./src/routes/*.ts",
   ], 
 };
 
