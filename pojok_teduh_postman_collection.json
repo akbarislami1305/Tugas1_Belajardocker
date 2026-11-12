@@ -1,22 +1,21 @@
 {
 	"info": {
 		"_postman_id": "793c87e5-cb57-423e-978b-9a25d62fbbc7",
-		"name": "Pojok Teduh API - Docker Test",
-		"description": "Koleksi Postman untuk pengujian endpoint API Pojok Teduh yang berjalan di Docker Compose.",
+		"name": "Pojok Teduh API - Nginx Reverse Proxy & Load Balancer",
+		"description": "Koleksi Postman untuk pengujian endpoint API Pojok Teduh melalui Nginx Reverse Proxy dan Load Balancer.",
 		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
 	},
 	"item": [
 		{
-			"name": "1. Health Check (Root)",
+			"name": "1. Health Check (Root via Nginx)",
 			"request": {
 				"method": "GET",
 				"header": [],
 				"url": {
-					"raw": "http://localhost:8080/",
+					"raw": "http://localhost/api/",
 					"protocol": "http",
 					"host": ["localhost"],
-					"port": "8080",
-					"path": [""]
+					"path": ["api", ""]
 				}
 			},
 			"response": []
@@ -36,11 +35,10 @@
 					"raw": "{\n  \"username\": \"mentee_postman\",\n  \"email\": \"mentee_postman@example.com\",\n  \"password\": \"password123\"\n}"
 				},
 				"url": {
-					"raw": "http://localhost:8080/auth/user/register",
+					"raw": "http://localhost/api/auth/user/register",
 					"protocol": "http",
 					"host": ["localhost"],
-					"port": "8080",
-					"path": ["auth", "user", "register"]
+					"path": ["api", "auth", "user", "register"]
 				}
 			},
 			"response": []
@@ -60,26 +58,24 @@
 					"raw": "{\n  \"email\": \"mentee_postman@example.com\",\n  \"password\": \"password123\"\n}"
 				},
 				"url": {
-					"raw": "http://localhost:8080/auth/user/login",
+					"raw": "http://localhost/api/auth/user/login",
 					"protocol": "http",
 					"host": ["localhost"],
-					"port": "8080",
-					"path": ["auth", "user", "login"]
+					"path": ["api", "auth", "user", "login"]
 				}
 			},
 			"response": []
 		},
 		{
-			"name": "4. Get All Spots / Search",
+			"name": "4. Get All Spots / Search (Load Balanced)",
 			"request": {
 				"method": "GET",
 				"header": [],
 				"url": {
-					"raw": "http://localhost:8080/spots/search",
+					"raw": "http://localhost/api/spots/search",
 					"protocol": "http",
 					"host": ["localhost"],
-					"port": "8080",
-					"path": ["spots", "search"]
+					"path": ["api", "spots", "search"]
 				}
 			},
 			"response": []
@@ -96,11 +92,10 @@
 					}
 				],
 				"url": {
-					"raw": "http://localhost:8080/users/profile",
+					"raw": "http://localhost/api/users/profile",
 					"protocol": "http",
 					"host": ["localhost"],
-					"port": "8080",
-					"path": ["users", "profile"]
+					"path": ["api", "users", "profile"]
 				}
 			},
 			"response": []

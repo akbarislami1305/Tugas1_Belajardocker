@@ -1,18 +1,20 @@
-# 🌿 Backend Pojok Teduh - Dockerization & Docker Compose
+# 🌿 Backend Pojok Teduh - Nginx Reverse Proxy, Load Balancer & Docker Compose
 
-Singkatnya Projet Pojok Teduh ini berfungsi untuk user bisa mencari tempat yang tenang di tengah hiruk pikuk aktivitas dalam perkotaan,Proyek ini merupakan implementasi Dockerisasi backend RESTful API (Express.js + TypeScript + Drizzle ORM) beserta database PostgreSQL menggunakan **Dockerfile** (multi-stage build) dan **Docker Compose**. Proyek ini dilengkapi dengan volume persistensi data, health check antar-service, serta migrasi database otomatis saat container dijalankan.
+Proyek ini merupakan implementasi Dockerisasi backend RESTful API (Express.js + TypeScript + Drizzle ORM) dan database PostgreSQL dengan penambahan **Nginx sebagai satu-satunya pintu masuk (*Single Entry Point*)**, **Reverse Proxy**, **Load Balancer (3 Replica Backend)**, **Rate Limiter**, **Header Keamanan**, serta kompresi **Gzip**. Seluruh service diorkestrasi menggunakan Docker Compose (`compose.yaml`).
 
 ---
 
 ## 📋 Daftar Isi
 1. [Prasyarat](#-prasyarat)
-2. [Arsitektur & Konfigurasi Docker](#-arsitektur--konfigurasi-docker)
+2. [Arsitektur & Konfigurasi Nginx / Docker](#-arsitektur--konfigurasi-nginx--docker)
 3. [Setup Environment](#-setup-environment)
-4. [Cara Build & Menjalankan Aplikasi](#-cara-build--menjalankan-aplikasi)
-5. [Pengujian Endpoint API](#-pengujian-endpoint-api)
-6. [Langkah Pengujian Persistensi Data (Volume)](#-langkah-pengujian-persistensi-data-volume)
-7. [Perintah Docker Berguna Lainnya](#-perintah-docker-berguna-lainnya)
-8. [Referensi dan Bantuan AI](#-referensi-dan-bantuan-ai)
+4. [Cara Menjalankan](#-cara-menjalankan)
+5. [Bukti Pengujian cURL (Load Balancing, Rate Limit, Gzip, Port Terisolasi)](#-bukti-pengujian-curl)
+6. [Jawaban Pertanyaan Evaluasi](#-jawaban-pertanyaan-evaluasi)
+7. [Pengujian Endpoint API (Postman)](#-pengujian-endpoint-api-postman)
+8. [Langkah Pengujian Persistensi Data (Volume)](#-langkah-pengujian-persistensi-data-volume)
+9. [Perintah Docker Berguna Lainnya](#-perintah-docker-berguna-lainnya)
+10. [Referensi dan Bantuan AI](#-referensi-dan-bantuan-ai)
 
 ---
 
@@ -22,46 +24,49 @@ Pastikan perangkat Anda telah terpasang:
 - **Docker Desktop** (versi 20.x ke atas / Docker Engine aktif)
 - **Docker Compose** (v2 / v5 ke atas)
 - **Git**
-- **Postman**, atau web browser untuk pengujian API.
+- **cURL** (atau PowerShell / Postman untuk pengujian API).
 
 ---
 
-## 🏗️ Arsitektur & Konfigurasi Docker
+## 🏗️ Arsitektur & Konfigurasi Nginx / Docker
 
-Proyek ini menggunakan arsitektur multi-container dengan 2 service utama:
+Proyek ini menerapkan arsitektur satu pintu masuk (*single entry point*) di mana klien publik hanya dapat mengakses port 80 pada Nginx:
 
 ```mermaid
 flowchart TD
-    Client["Client / Postman / Browser"] -->|"Port 8080"| Backend["Service: backend (Node.js 20 Alpine)"]
+    Client["Client / Postman / Browser"] -->|"Port 80 (Satu Pintu)"| Nginx["Nginx Reverse Proxy & Load Balancer"]
 
-    subgraph Network ["Docker Network: pojok_teduh_network"]
-        Backend -->|"Port 5432"| DB[("Service: db - PostgreSQL 16")]
+    subgraph Network ["Docker Network: pojok_teduh_network (Internal / Terisolasi)"]
+        Nginx -->|"Round-Robin (Upstream Zone)"| B1["Backend Replica 1 (:8080)"]
+        Nginx -->|"Round-Robin (Upstream Zone)"| B2["Backend Replica 2 (:8080)"]
+        Nginx -->|"Round-Robin (Upstream Zone)"| B3["Backend Replica 3 (:8080)"]
+
+        B1 --> DB[("Database: PostgreSQL 16 (:5432)")]
+        B2 --> DB
+        B3 --> DB
     end
 
     DB ---|"Persistent Storage"| Volume[("Volume: pojok_teduh_postgres_data")]
 ```
 
-### 1. `Dockerfile` (Multi-Stage Build)
-- **Stage 1 (`builder`)**: Menggunakan image `node:20-alpine`, menginstall dependensi lengkap, dan mengompilasi TypeScript menjadi file JavaScript siap pakai pada direktori `dist/`.
-- **Stage 2 (`runner`)**: Menggunakan base image `node:20-alpine` yang ramping, hanya menginstall `dependencies` production (`npm install --omit=dev`), menyalin hasil build `dist/` dan migration files `drizzle/`, sehingga ukuran image akhir sangat ringan dan efisien.
-
-### 2. `docker-compose.yml`
-- **`db`**: Menggunakan image `postgres:16-alpine`, port mapping `5432:5432`, volume persistensi `postgres_data`, dan healthcheck `pg_isready`.
-- **`backend`**: Dibuat dari `Dockerfile`, mengekspos port `8080:8080`, terhubung ke service `db` dengan `depends_on: { db: { condition: service_healthy } }`.
-- **`volumes`**: `postgres_data` (Named Volume) untuk menjamin data database tetap tersimpan meskipun container dimatikan/dibuat ulang.
-- **`networks`**: `pojok_teduh_network` (Bridge Network) untuk isolasi dan komunikasi aman antar-container.
+### 1. Lima Hal Wajib pada `compose.yaml` dan Konfigurasi Nginx:
+1. **Satu Pintu**: Hanya service `nginx` yang mengekspos ports ke host (`80:80`). Service `backend` dan `db` **tidak memiliki `ports`** sama sekali sehingga aman dari akses publik luar.
+2. **Reverse Proxy**: Direktif `location /api/` meneruskan permintaan ke upstream backend menggunakan `proxy_pass http://backend_servers/;` lengkap dengan header `proxy_set_header Host $host;` dan `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`.
+3. **Load Balancing**: Backend berjalan dengan **3 replica** (`deploy: replicas: 3`). Blok upstream menggunakan direktif `zone backend_zone 64k;` untuk shared memory antar worker, serta respons menyertakan header pelacak `X-Upstream: $upstream_addr`.
+4. **Rate Limit**: Route `/api/` diproteksi menggunakan `limit_req zone=api_limit burst=2 nodelay;` dengan batas `rate=3r/s` dan menolak permintaan berlebih dengan kode status `limit_req_status 429;`.
+5. **Header Keamanan & Gzip**: Mengaktifkan proteksi `X-Content-Type-Options: nosniff always;`, `X-Frame-Options: DENY;`, `X-XSS-Protection: 1; mode=block;`, serta `gzip on;` dengan `gzip_proxied any;` dan `gzip_types application/json;`.
 
 ---
 
 ## 🔐 Setup Environment
 
-1. Duplikat file template konfigurasi `.env.example` menjadi `.env`:
+1. Salin template konfigurasi `.env.example` menjadi `.env`:
    ```bash
    cp .env.example .env
    ```
    *(Untuk pengguna Windows PowerShell: `Copy-Item .env.example .env`)*
 
-2. Periksa isi file `.env` (nilai default sudah disesuaikan agar langsung siap digunakan dengan Docker Compose):
+2. Pastikan file `.env` memuat nilai berikut:
    ```env
    PORT=8080
    JWT_SECRET=pojok_teduh_secret_key_2026
@@ -71,49 +76,161 @@ flowchart TD
    POSTGRES_DB=pojok_teduh_db
    DB_PORT=5432
 
-   # URL koneksi untuk backend di dalam jaringan Docker Compose (host: db)
    DATABASE_URL=postgresql://postgres:postgres123@db:5432/pojok_teduh_db?schema=public
    ```
 
 ---
 
-## 🚀 Cara Build & Menjalankan Aplikasi
+## 🚀 Cara Menjalankan
 
-1. **Jalankan Build dan Start Seluruh Service:**
+1. **Jalankan Build dan Start Semua Container:**
    ```bash
    docker compose up --build -d
    ```
 
-2. **Cek Status Container yang Sedang Berjalan:**
+2. **Periksa Status Container:**
    ```bash
    docker compose ps
    ```
-   *Pastikan kedua service (`pojok_teduh_db` dan `pojok_teduh_backend`) berstatus `running` / `Up` (healthy).*
-
-3. **Melihat Log Aplikasi:**
-   ```bash
-   docker compose logs -f backend
+   *Output menunjukkan 5 container berjalan: 1 db, 3 backend replicas, dan 1 nginx (hanya nginx yang memiliki port mapping `80->80`):*
    ```
-   *Backend akan otomatis menjalankan migrasi skema tabel Drizzle dan menampilkan:*
-   ```
-   ⏳ Menjalankan migrasi database...
-   ✅ Migrasi database berhasil dijalankan!
-   🚀 Server BERHASIL JALAN di http://localhost:8080
+   NAME                             IMAGE                          STATUS                    PORTS
+   pojok_teduh_db                   postgres:16-alpine             Up (healthy)              5432/tcp
+   pojok_teduh_nginx                nginx:alpine                   Up                        0.0.0.0:80->80/tcp
+   tugas1_belajardocker-backend-1   tugas1_belajardocker-backend   Up                        8080/tcp
+   tugas1_belajardocker-backend-2   tugas1_belajardocker-backend   Up                        8080/tcp
+   tugas1_belajardocker-backend-3   tugas1_belajardocker-backend   Up                        8080/tcp
    ```
 
 ---
 
-## 🧪 Pengujian Endpoint API
+## 🧪 Bukti Pengujian cURL
 
-> 💡 **Pengujian Menggunakan Postman**:  
-> Tersedia berkas koleksi siap pakai **`pojok_teduh_postman_collection.json`** di root direktori proyek. Anda cukup melakukan *Import* ke aplikasi Postman untuk langsung menguji seluruh endpoint.
+Berikut adalah bukti nyata hasil eksekusi perintah `curl` dari terminal yang membuktikan fitur reverse proxy, load balancing, rate limiting, header keamanan, gzip, dan isolasi port bekerja:
+
+### 1. Bukti Load Balancing (Header `X-Upstream` Berganti Antar 3 Replica)
+Perintah curl dieksekusi berulang kali ke endpoint `http://localhost/api/spots/search`. Terlihat jelas nilai header `X-Upstream` berganti secara bergantian (*Round-Robin*) di antara IP ketiga replica backend (`172.18.0.5:8080`, `172.18.0.4:8080`, `172.18.0.3:8080`):
+
+```bash
+$ for i in {1..6}; do curl -s -I http://localhost/api/spots/search | grep "X-Upstream"; sleep 0.4; done
+```
+**Output Terminal:**
+```http
+X-Upstream: 172.18.0.5:8080
+X-Upstream: 172.18.0.4:8080
+X-Upstream: 172.18.0.3:8080
+X-Upstream: 172.18.0.5:8080
+X-Upstream: 172.18.0.4:8080
+X-Upstream: 172.18.0.3:8080
+```
 
 ---
 
-### 1. Request: Health Check (Root)
+### 2. Bukti Rate Limit (Menolak Permintaan Cepat dengan HTTP 429)
+Perintah curl dikirimkan secara beruntun dengan intensitas tinggi tanpa jeda untuk menguji `limit_req`:
+
+```bash
+$ for i in {1..7}; do curl -s -o /dev/null -w "%{http_code}\n" http://localhost/api/spots/search; done
+```
+**Output Terminal:**
+```
+200
+200
+200
+429
+429
+429
+429
+```
+
+Detail output lengkap header saat terkena Rate Limit:
+```bash
+$ for i in {1..5}; do curl -i -s http://localhost/api/spots/search | head -n 14; done
+```
+**Output Terminal:**
+```http
+HTTP/1.1 429 Too Many Requests
+Server: nginx/1.31.8
+Date: Tue, 10 Nov 2026 07:57:53 GMT
+Content-Type: text/html
+Content-Length: 169
+Connection: keep-alive
+X-Content-Type-Options: nosniff
+X-Frame-Options: DENY
+X-XSS-Protection: 1; mode=block
+
+<html>
+<head><title>429 Too Many Requests</title></head>
+<body>
+<center><h1>429 Too Many Requests</h1></center>
+<hr><center>nginx/1.31.8</center>
+</body>
+</html>
+```
+
+---
+
+### 3. Bukti Header Keamanan dan Gzip Kompresi
+Perintah curl dengan header `Accept-Encoding: gzip` dikirimkan ke Nginx:
+
+```bash
+$ curl -I -H "Accept-Encoding: gzip" http://localhost/api/spots/search
+```
+**Output Terminal:**
+```http
+HTTP/1.1 200 OK
+Server: nginx/1.31.8
+Date: Tue, 10 Nov 2026 07:58:21 GMT
+Content-Type: application/json; charset=utf-8
+Connection: keep-alive
+Vary: Accept-Encoding
+X-Powered-By: Express
+Access-Control-Allow-Origin: *
+ETag: W/"29d1-PrTMQyZnuYGW/vwXw2U5Fv8NEzs"
+X-Content-Type-Options: nosniff
+X-Frame-Options: DENY
+X-XSS-Protection: 1; mode=block
+X-Upstream: 172.18.0.5:8080
+Content-Encoding: gzip
+```
+*(Bukti: Header `X-Content-Type-Options: nosniff` dan `Content-Encoding: gzip` aktif pada respons payload JSON).*
+
+---
+
+### 4. Bukti Port Backend Lama (8080) Tidak Bisa Diakses dari Host
+Mencoba mengakses port backend lama `8080` langsung dari host machine:
+
+```bash
+$ curl -I http://localhost:8080
+```
+**Output Terminal:**
+```
+curl: (7) Failed to connect to localhost port 8080: Connection refused
+```
+*(Bukti: Koneksi ditolak / Connection refused karena port 8080 tidak lagi dipublikasikan ke host).*
+
+---
+
+## 💡 Jawaban Pertanyaan Evaluasi
+
+### (a) Kenapa upstream perlu zone? Apa yang terjadi kalau dihapus?
+Direktif `zone` mendefinisikan area memori bersama (*shared memory zone*) yang memungkinkan seluruh worker process Nginx saling berbagi informasi status upstream, konfigurasi server, serta metrik load balancing secara terpusat. Jika direktif `zone` dihapus, setiap worker process Nginx akan mengelola status upstream dan giliran *round-robin* secara terisolasi di memori pribadinya masing-masing. Akibatnya, distribusi beban kerja antar-replica backend menjadi tidak merata dan tidak sinkron karena satu worker tidak mengetahui request yang telah diproses oleh worker lainnya.
+
+### (b) Kenapa limit_req_status diganti ke 429? Apa bedanya dengan bawaan nginx?
+Nilai `limit_req_status` diganti ke `429 Too Many Requests` agar mematuhi standar HTTP RFC 6585 yang secara spesifik menandakan bahwa klien telah melampaui batas kecepatan permintaan (*rate limit*). Secara default, bawaan Nginx mengembalikan kode status `503 Service Temporarily Unavailable` ketika request ditolak oleh `limit_req`. Bedanya, status 503 mengesankan adanya kerusakan atau beban berlebih internal pada server, sedangkan status 429 secara tepat mengedukasi klien bahwa penolakan terjadi akibat frekuensi request yang dikirimkan oleh klien itu sendiri.
+
+### (c) Kenapa backend dan database tidak punya ports, dan nginx menjangkau backend lewat apa?
+Backend dan database sengaja tidak memiliki `ports` yang dipetakan ke host guna menerapkan arsitektur satu pintu masuk (*single entry point*) dan prinsip keamanan *least privilege*, sehingga service internal tidak dapat ditembus langsung dari jaringan luar. Nginx menjangkau ketiga replica backend melalui jaringan bridge internal Docker (`pojok_teduh_network`) pada port privat 8080. Di dalam jaringan tersebut, DNS internal Docker secara otomatis meresolusi nama service `backend` ke alamat IP masing-masing container replica.
+
+---
+
+## 📮 Pengujian Endpoint API (Postman)
+
+Koleksi Postman siap pakai tersedia pada berkas **`pojok_teduh_postman_collection.json`** di root repositori. Anda cukup mengimpor berkas tersebut ke Postman untuk langsung menguji endpoint melalui Nginx:
+
+### 1. Request: Health Check (Root via Nginx)
 - **Method**: `GET`
-- **URL**: `http://localhost:8080/`
-- Klik **Send**
+- **URL**: `http://localhost/api/`
 - **Ekspektasi Status**: `200 OK`
 - **Respon**:
   ```
@@ -124,10 +241,9 @@ flowchart TD
 
 ### 2. Request: Register User Baru
 - **Method**: `POST`
-- **URL**: `http://localhost:8080/auth/user/register`
-- Masuk ke tab **Headers**:
-  - `Content-Type`: `application/json`
-- Masuk ke tab **Body** $\rightarrow$ pilih **raw** $\rightarrow$ pilih format **JSON**:
+- **URL**: `http://localhost/api/auth/user/register`
+- **Headers**: `Content-Type: application/json`
+- **Body (raw JSON)**:
   ```json
   {
     "username": "mentee_postman",
@@ -135,85 +251,37 @@ flowchart TD
     "password": "password123"
   }
   ```
-- Klik **Send**
 - **Ekspektasi Status**: `201 Created`
-- **Respon**:
-  ```json
-  {
-    "status": "success",
-    "data": {
-      "id": 4,
-      "username": "mentee_postman",
-      "email": "mentee_postman@example.com",
-      "role": "USER"
-    }
-  }
-  ```
 
 ---
 
 ### 3. Request: Login User
 - **Method**: `POST`
-- **URL**: `http://localhost:8080/auth/user/login`
-- Masuk ke tab **Headers**:
-  - `Content-Type`: `application/json`
-- Masuk ke tab **Body** $\rightarrow$ pilih **raw** $\rightarrow$ pilih format **JSON**:
+- **URL**: `http://localhost/api/auth/user/login`
+- **Headers**: `Content-Type: application/json`
+- **Body (raw JSON)**:
   ```json
   {
     "email": "mentee_postman@example.com",
     "password": "password123"
   }
   ```
-- Klik **Send**
-- **Ekspektasi Status**: `200 OK`
-- **Respon**:
-  ```json
-  {
-    "status": "success",
-    "data": {
-      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-      "user": {
-        "id": 4,
-        "username": "mentee_postman",
-        "email": "mentee_postman@example.com",
-        "role": "USER"
-      }
-    }
-  }
-  ```
-  *(Salin string `token` ini untuk request nomor 5)*
+- **Ekspektasi Status**: `200 OK` (Kembalian berupa token JWT).
 
 ---
 
-### 4. Request: Get All Spots / Search
+### 4. Request: Get All Spots / Search (Load Balanced)
 - **Method**: `GET`
-- **URL**: `http://localhost:8080/spots/search`
-- Klik **Send**
-- **Ekspektasi Status**: `200 OK`
+- **URL**: `http://localhost/api/spots/search`
+- **Ekspektasi Status**: `200 OK` (Periksa tab *Headers* respon untuk melihat `X-Upstream` berganti).
 
 ---
 
-### 5. Request: Get Profile (Endpoint Terproteksi JWT Token)
+### 5. Request: Get Profile (Endpoint Terproteksi)
 - **Method**: `GET`
-- **URL**: `http://localhost:8080/users/profile`
-- Masuk ke tab **Authorization**:
-  - **Type**: `Bearer Token`
-  - **Token**: Tempelkan string token yang didapat dari response Login (Request 3).
-- Klik **Send**
-- **Ekspektasi Status**: `200 OK`
-- **Respon**:
-  ```json
-  {
-    "status": "success",
-    "data": {
-      "id": 4,
-      "email": "mentee_postman@example.com",
-      "username": "mentee_postman",
-      "role": "USER",
-      "photoUrl": null
-    }
-  }
-  ```
+- **URL**: `http://localhost/api/users/profile`
+- **Authorization**: `Bearer Token` (Gunakan token dari respons login).
+- **Ekspektasi Status**: `200 OK`.
 
 ---
 
@@ -221,49 +289,17 @@ flowchart TD
 
 Pengujian ini membuktikan bahwa data database tidak hilang saat container dihancurkan dan dibuat ulang karena tersimpan aman pada Docker Named Volume (`pojok_teduh_postgres_data`):
 
-### Langkah 1: Pastikan Data User Telah Terdaftar (di Postman)
-Gunakan akun yang telah didaftarkan pada pengujian sebelumnya (Request 2: `POST /auth/user/register`):
-- **Email**: `mentee_postman@example.com`
-- **Password**: `password123`
-
----
-
-### Langkah 2: Hentikan dan Hapus Container
-Di terminal, jalankan perintah berikut untuk menghentikan dan menghapus container yang sedang berjalan:
-```bash
-docker compose down
-```
-> ⚠️ **Catatan Penting**: **JANGAN** gunakan flag `-v` agar volume `pojok_teduh_postgres_data` tetap dipertahankan.
-
----
-
-### Langkah 3: Buat Ulang dan Nyalakan Container Baru
-Nyalakan kembali seluruh service dari container baru:
-```bash
-docker compose up -d
-```
-Verifikasi bahwa container baru sudah berjalan dan berstatus sehat (*healthy*):
-```bash
-docker compose ps
-```
-
----
-
-### Langkah 4: Verifikasi Data Tetap Ada (Login Ulang di Postman)
-Kembali ke Postman, buka **Request 3: Login User** (`POST http://localhost:8080/auth/user/login`):
-- **Body (JSON)**:
-  ```json
-  {
-    "email": "mentee_postman@example.com",
-    "password": "password123"
-  }
-  ```
-- Klik tombol **Send**.
-
-**Hasil yang Diharapkan**:
-- Status respon tetap **`200 OK`**.
-- Respon mengembalikan token JWT yang valid dan data user `mentee_postman`.
-- **Kesimpulan**: Data user tidak hilang dan berhasil dimuat kembali dari volume Docker meskipun container sebelumnya telah dihapus dan dibuat ulang.
+1. **Pastikan Data User Terdaftar**: Jalankan `POST http://localhost/api/auth/user/register` via Postman atau cURL.
+2. **Hentikan dan Hapus Container**:
+   ```bash
+   docker compose down
+   ```
+   *(⚠️ Jangan gunakan flag `-v` agar volume data tetap utuh).*
+3. **Nyalakan Kembali Container**:
+   ```bash
+   docker compose up -d
+   ```
+4. **Verifikasi Data Tetap Ada**: Jalankan `POST http://localhost/api/auth/user/login` dengan kredensial yang sama. Respon tetap `200 OK` membuktikan persistensi data berjalan sempurna.
 
 ---
 
@@ -271,16 +307,16 @@ Kembali ke Postman, buka **Request 3: Login User** (`POST http://localhost:8080/
 
 | Perintah | Fungsi |
 | :--- | :--- |
-| `docker compose up --build -d` | Membangun image dan menjalankan container di background |
-| `docker compose ps` | Menampilkan status dan healthcheck container yang sedang berjalan |
-| `docker compose logs -f` | Menampilkan log real-time dari semua container |
-| `docker compose down` | Menghentikan dan menghapus container (volume data tetap aman) |
-| `docker compose down -v` | Menghentikan container dan menghapus seluruh volume (reset data) |
-| `docker compose restart backend` | Merestart service backend saja |
+| `docker compose up --build -d` | Membangun image dan menjalankan seluruh container di background |
+| `docker compose ps` | Menampilkan daftar container dan status port |
+| `docker compose logs -f nginx` | Melihat log akses dan error Nginx secara realtime |
+| `docker compose logs -f backend` | Melihat log replica backend secara realtime |
+| `docker compose down` | Menghentikan container tanpa menghapus volume data |
+| `docker compose down -v` | Menghentikan container dan menghapus volume (reset data) |
 
 ---
 
 ## 🤖 Referensi dan Bantuan AI
-- **Framework & Libraries**: Express.js, TypeScript, Drizzle ORM, PostgreSQL Driver (`pg`), Swagger UI Express, Bcryptjs, JSONWebToken.
-- **Docker Images**: `node:20-alpine` (official Node.js Docker Hub), `postgres:16-alpine` (official PostgreSQL Docker Hub).
-- **Bantuan AI**: Menggunakan AI Assistant (Antigravity) dalam penyusunan multi-stage `Dockerfile`, konfigurasi `docker-compose.yml`, pembuatan skrip migrasi database otomatis, dan standarisasi dokumentasi `README.md`.
+- **Official Images**: `nginx:alpine`, `node:20-alpine`, `postgres:16-alpine`.
+- **Dokumentasi Nginx**: Modul `ngx_http_upstream_module`, `ngx_http_limit_req_module`, `ngx_http_gzip_module`, dan `ngx_http_headers_module`.
+- **Bantuan AI**: Menggunakan AI Assistant (Antigravity) dalam perancangan konfigurasi Nginx reverse proxy, load balancer shared memory zone, penataan Docker Compose multi-replica, serta penyusunan bukti uji teknis dan dokumentasi `README.md`.
